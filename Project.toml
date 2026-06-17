@@ -1,0 +1,7 @@
+name = "TomoBOS"
+uuid = "991a90e4-6738-4762-a0f0-4ce47f73f856"
+authors = ["Akamine"]
+version = "1.0.0-DEV"
+
+[compat]
+julia = "1.10.10"

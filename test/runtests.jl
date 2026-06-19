@@ -55,19 +55,41 @@ include("helpers.jl")
     u = project_point(ᵇx, cam, board)
 
     # 手計算すると u = (α*Xc/Zc + u0, α*Yc/Zc + v0) = (10*2/2+5.5, 10*(-2)/2+3) = (15.5, -7.0))
-    @test u ≈ SVector{2,T}(15.5, -7.0)
+    @test u ≈ SVector{3,T}(15.5, -7.0, 1.0)
 
     bytes_allocated = @allocated project_point(ᵇx, cam, board)
     @test bytes_allocated == 0
 end
 
+@testset "normalize_points" begin
+    T = Float64
+    pts = [SVector{3,T}(1.0, 2.0, 1.0), SVector{3,T}(3.0, 4.0, 1.0), SVector{3,T}(5.0, 6.0, 1.0)]
+    norm_pts, T_mat = TomoBOS.normalize_points(pts)
+
+    n_pts = length(pts)
+
+    # Check that the normalized points have zero mean
+    μ1 = sum(p[1] for p in norm_pts) / n_pts
+    μ2 = sum(p[2] for p in norm_pts) / n_pts
+    @test μ1 ≈ 0.0
+    @test μ2 ≈ 0.0
+
+    # Check that the average distance from the origin is sqrt(2)
+    mean_dist = sum(sqrt(p[1]^2 + p[2]^2) for p in norm_pts) / n_pts
+    @test mean_dist ≈ sqrt(2)
+
+    # Check that the normalization matrix is correct
+    @test norm_pts[1] ≈ T_mat * pts[1]
+    @test norm_pts[2] ≈ T_mat * pts[2]
+    @test norm_pts[3] ≈ T_mat * pts[3]
+end
 
 # @testset "estimate_initial_pose" begin
 #     # Set up a synthetic problem with known camera and board poses, and synthetic marker data
-#     (; cams_true, boards_true, all_marker_data) = CircularGridSetup.setup_problem()
+#     (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup()
 
 #     # Estimate initial poses using the synthetic marker data
-#     cams_init, boards_init = estimate_initial_pose(all_marker_data)
+#     cams_init, boards_init = estimate_initial_pose(all_marker_data; ref_cam_id=1)
 
 #     # Compare the estimated poses with the true poses
 #     atol = 1e-5

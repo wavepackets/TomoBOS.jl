@@ -27,15 +27,20 @@ function generate_synthetic_marker_data(cams, boards, ᵇx_markers)
     
     for (cam_id, cam) in cams
         for (board_id, board) in boards
+            # もしボードが裏 or ほぼ真横を向いている(ボードのz軸(法線ベクトル)がカメラのz軸と同じ向き or ほぼゼロ)であれば、マーカーは見えないとする (全てのマーカーを無効とする)
+            if dot(board.R[:,3], cam.R[:,3]) > -0.1
+                continue
+            end
+
             # マーカーのボード座標を、ピクセル座標に投影する
             u_markers = project_point.(ᵇx_markers, Ref(cam), Ref(board))
 
             # 投影されたマーカーのうち、画像内にあるものだけを有効とする
             valid_markers = [1<=u[1]<=cam.umax && 1<=u[2]<=cam.vmax for u in u_markers]
             
-            # もしボードが裏 or ほぼ真横を向いている(ボードのz軸(法線ベクトル)がカメラのz軸と同じ向き or ほぼゼロ)であれば、マーカーは見えないとする (全てのマーカーを無効とする)
-            if dot(board.R[:,3], cam.R[:,3]) > -0.1
-                valid_markers .= false
+            # もし有効なマーカーが1つもなければ、次のボードに進む
+            if !any(valid_markers)
+                continue
             end
 
             marker_data = MarkerData(u_markers[valid_markers], ᵇx_markers[valid_markers], cam_id, board_id)

@@ -5,6 +5,7 @@ using JET
 
 using StaticArrays
 using LinearAlgebra
+using OrderedCollections
 
 @testset "TomoBOS.jl" begin
     @testset "Code quality (Aqua.jl)" begin
@@ -16,22 +17,7 @@ using LinearAlgebra
     # Write your tests here.
 end
 
-
-Rx(θ) = [
-    1.0 0.0 0.0;
-    0.0 cos(θ) -sin(θ);
-    0.0 sin(θ) cos(θ)
-]
-Ry(θ) = [
-    cos(θ) 0.0 sin(θ);
-    0.0 1.0 0.0;
-    -sin(θ) 0.0 cos(θ)
-]
-Rz(θ) = [
-    cos(θ) -sin(θ) 0.0;
-    sin(θ) cos(θ) 0.0;
-    0.0 0.0 1.0
-]
+include("helpers.jl")
 
 @testset "project_point" begin
     T = Float64
@@ -74,3 +60,28 @@ Rz(θ) = [
     bytes_allocated = @allocated project_point(ᵇx, cam, board)
     @test bytes_allocated == 0
 end
+
+
+# @testset "estimate_initial_pose" begin
+#     # Set up a synthetic problem with known camera and board poses, and synthetic marker data
+#     (; cams_true, boards_true, all_marker_data) = CircularGridSetup.setup_problem()
+
+#     # Estimate initial poses using the synthetic marker data
+#     cams_init, boards_init = estimate_initial_pose(all_marker_data)
+
+#     # Compare the estimated poses with the true poses
+#     atol = 1e-5
+#     for cam_id in keys(cams_true)
+#         cam_true = cams_true[cam_id]
+#         cam_init = cams_init[cam_id]
+#         @test cam_init.R ≈ cam_true.R atol=atol
+#         @test cam_init.t ≈ cam_true.t atol=atol
+#     end
+
+#     for board_id in keys(boards_true)
+#         board_true = boards_true[board_id]
+#         board_init = boards_init[board_id]
+#         @test board_init.R ≈ board_true.R atol=atol
+#         @test board_init.t ≈ board_true.t atol=atol
+#     end
+# end

@@ -73,14 +73,14 @@ abstract type AbstractMarkerData end
     MarkerData{T<:Real} <: AbstractMarkerData
 
 A structure to hold detected marker data.
-- `pixel_coords`: Pixel coordinates of marker corners (Vector of SVector{2,T})
-- `board_coords`: Board coordinates of marker corners (Vector of SVector{3,T})
+- `u_markers`: Pixel coordinates of marker corners (Vector of SVector{2,T})
+- `ᵇx_markers`: Board coordinates of marker corners (Vector of SVector{3,T})
 - `camera_id`: ID of the camera that detected the marker
 - `board_id`: ID of the board to which the marker belongs
 """
 struct MarkerData{T<:Real} <: AbstractMarkerData
-    pixel_coords::Vector{SVector{2,T}}  # Pixel coordinates of marker corners
-    board_coords::Vector{SVector{3,T}}  # Board coordinates of marker corners
+    u_markers::Vector{SVector{2,T}}  # Pixel coordinates of marker corners
+    ᵇx_markers::Vector{SVector{3,T}}  # Board coordinates of marker corners
     camera_id::Int
     board_id::Int
 end
@@ -101,10 +101,12 @@ Returns a 2D point in pixel coordinates (SVector{2,T}).
 """
 function project_point(ᵇx, cam::PinholeCamera{T}, board::Board{T}) where T<:Real
     # Transform point from board coordinates to global coordinates
-    x = board.R * ᵇx .+ board.t
+    Rb, tb = board.R, board.t
+    x = Rb * ᵇx .+ tb
     
     # Transform point from global coordinates to camera coordinates
-    ᶜx = cam.R' * (x .- cam.t)
+    Rc, tc = cam.R, cam.t
+    ᶜx = Rc' * (x .- tc)  # Assume x = Rc * ᶜx + tc => ᶜx = Rc' * (x - tc)
 
     # Project point onto image plane
     u = cam.K[1,1] * (ᶜx[1] / ᶜx[3]) + cam.K[1,3]

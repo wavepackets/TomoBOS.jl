@@ -79,9 +79,9 @@ end
     @test mean_dist ≈ sqrt(2)
 
     # Check that the normalization matrix is correct
-    @test norm_pts[1] ≈ T_mat * pts[1]
-    @test norm_pts[2] ≈ T_mat * pts[2]
-    @test norm_pts[3] ≈ T_mat * pts[3]
+    for i in 1:n_pts
+        @test norm_pts[i] ≈ T_mat * pts[i]
+    end
 end
 
 # @testset "estimate_initial_pose" begin

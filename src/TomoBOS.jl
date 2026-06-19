@@ -125,8 +125,10 @@ Returns a tuple of (normalized points, normalization matrix).
 """
 function normalize_points(pts::AbstractVector{<:SVector{3,T}}) where {T<:Real}
     M = length(pts)
+
+    # Ensure that the input points are not empty
     if M == 0
-        return SVector{3,T}[], SMatrix{3,3,T,9}(I)
+        throw(ArgumentError("Input points cannot be empty"))
     end
 
     # Compute the centroid of the points
@@ -135,6 +137,11 @@ function normalize_points(pts::AbstractVector{<:SVector{3,T}}) where {T<:Real}
 
     # Compute the average distance from the centroid
     mean_dist = sum(sqrt((p[1] - μ1)^2 + (p[2] - μ2)^2) for p in pts) / M
+
+    # Ensure that the average distance is greater than zero to avoid division by zero
+    if mean_dist ≈ 0.0
+        throw(ArgumentError("All points are identical; cannot normalize"))
+    end
 
     # Compute the scaling factor to make the average distance sqrt(2)
     scale = sqrt(2) / mean_dist

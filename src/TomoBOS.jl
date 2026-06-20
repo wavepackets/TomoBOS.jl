@@ -124,19 +124,19 @@ Normalizes a set of 3D points and returns the normalized points along with the n
 Returns a tuple of (normalized points, normalization matrix).
 """
 function normalize_points(pts::AbstractVector{<:SVector{3,T}}) where {T<:Real}
-    M = length(pts)
+    N = length(pts)
 
     # Ensure that the input points are not empty
-    if M == 0
+    if N == 0
         throw(ArgumentError("Input points cannot be empty"))
     end
 
     # Compute the centroid of the points
-    μ1 = sum(p[1] for p in pts) / M
-    μ2 = sum(p[2] for p in pts) / M
+    μ1 = sum(p[1] for p in pts) / N
+    μ2 = sum(p[2] for p in pts) / N
 
     # Compute the average distance from the centroid
-    mean_dist = sum(sqrt((p[1] - μ1)^2 + (p[2] - μ2)^2) for p in pts) / M
+    mean_dist = sum(sqrt((p[1] - μ1)^2 + (p[2] - μ2)^2) for p in pts) / N
 
     # Ensure that the average distance is greater than zero to avoid division by zero
     if mean_dist ≈ 0.0
@@ -155,6 +155,54 @@ function normalize_points(pts::AbstractVector{<:SVector{3,T}}) where {T<:Real}
     return norm_pts, T_mat
 end
 
+"""
+    estimate_homography_dlt(pts_src::AbstractVector{<:SVector{3,T}}, pts_dst::AbstractVector{<:SVector{3,T}}) where {T<:Real}
+
+Estimates a homography matrix using the Direct Linear Transform (DLT) algorithm given corresponding points in source and destination planes.
+- `pts_src`: A vector of points in the source plane (SVector{3,T} where T<:Real)
+- `pts_dst`: A vector of corresponding points in the destination plane (SVector{3,T} where T<:Real)
+Returns the estimated homography matrix (3x3 SMatrix).
+
+Note: At least 4 point correspondences are required to estimate the homography.
+References: Hartley and Zisserman, "Multiple View Geometry in Computer Vision", 2004, p.109 (Algorithm 4.2)
+"""
+function estimate_homography_dlt(pts_src::AbstractVector{<:SVector{3,T}}, pts_dst::AbstractVector{<:SVector{3,T}}) where {T<:Real}
+    N = length(pts_src)
+    if N < 4
+        throw(ArgumentError("At least 4 point correspondences are required to estimate homography"))
+    end
+    if length(pts_dst) != N
+        throw(ArgumentError("Source and destination point sets must have the same number of points"))
+    end
+
+    # Normalize the source and destination points
+    norm_src, T_src = normalize_points(pts_src)
+    norm_dst, T_dst = normalize_points(pts_dst)
+
+    # Construct the matrix A for DLT
+    A = zeros(T, 2N, 9)
+    for i in 1:N
+        X = norm_src[i][1]
+        Y = norm_src[i][2]
+        x = norm_dst[i][1]
+        y = norm_dst[i][2]
+
+        A[2i-1, :] .= [X, Y, 1, 0, 0, 0, -x*X, -x*Y, -x]
+        A[2i, :]   .= [0, 0, 0, X, Y, 1, -y*X, -y*Y, -y]
+    end
+
+    # Perform SVD on A
+    F = svd(A)
+    h_norm = F.V[:, end]  # The homography is the last column of V
+
+    # Reshape the homography vector into a 3x3 matrix
+    H_norm = reshape(h_norm, (3, 3))'
+
+    # Denormalize the homography
+    H_unscaled = inv(T_dst) * H_norm * T_src
+    H = H_unscaled / H_unscaled[3, 3]  # Normalize to make H[3,3] = 1
+    return H
+end
 
 
 end # module TomoBOS

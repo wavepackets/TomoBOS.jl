@@ -7,6 +7,8 @@ using StaticArrays
 using LinearAlgebra
 using OrderedCollections
 
+using Random
+
 @testset "TomoBOS.jl" begin
     @testset "Code quality (Aqua.jl)" begin
         Aqua.test_all(TomoBOS)
@@ -79,9 +81,24 @@ end
     @test mean_dist ≈ sqrt(2)
 
     # Check that the normalization matrix is correct
-    for i in 1:n_pts
+    for i in eachindex(pts)
         @test norm_pts[i] ≈ T_mat * pts[i]
     end
+end
+
+@testset "estimate_homography_dlt" begin
+    T = Float64
+    rng = MersenneTwister(1234)
+
+    H_true = @SMatrix [2.0 0.3 -1.0; 0.1 1.5 2.0; 0.001 0.002 1.0]  # 適当なホモグラフィ行列 (回転行列だとシンプルすぎるので変更)
+    pts_src = [SVector{3,T}(rand(rng), rand(rng), 1.0) for _ in 1:10]
+    pts_dst = map(pts_src) do p
+        p_trans = H_true * p
+        SVector{3,T}(p_trans[1]/p_trans[3], p_trans[2]/p_trans[3], 1.0)  # Normalize to make the last coordinate 1
+    end
+
+    H_est = TomoBOS.estimate_homography_dlt(pts_src, pts_dst)
+    @test H_est ≈ H_true
 end
 
 # @testset "estimate_initial_pose" begin

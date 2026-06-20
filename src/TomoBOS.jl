@@ -1,6 +1,8 @@
 module TomoBOS
 
 using StaticArrays
+using DataStructures
+
 using LinearAlgebra
 
 using PythonCall

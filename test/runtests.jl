@@ -5,7 +5,7 @@ using JET
 
 using StaticArrays
 using LinearAlgebra
-using OrderedCollections
+using DataStructures
 
 using Random
 

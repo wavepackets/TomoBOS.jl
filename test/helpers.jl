@@ -1,5 +1,5 @@
 using StaticArrays
-using OrderedCollections
+using DataStructures
 using LinearAlgebra
 
 """
@@ -64,7 +64,7 @@ function create_circular_grid_setup()
     radius_cams = 0.5  # All cameras are placed on a circle of this radius around [0,0,radius_cams] in the world coordinate
     ᶜx = SVector{3,T}(0.0, 0.0, radius_cams)
 
-    cams_true = OrderedDict{Int, PinholeCamera{T}}()
+    cams_true = SortedDict{Int, PinholeCamera{T}}()
     Rc1 = SMatrix{3,3,T,9}(I)
     tc1 = SVector{3,T}(0.0, 0.0, 0.0)
     cams_true[1] = PinholeCamera{T}(Rc1, tc1, K, umax, vmax)
@@ -83,7 +83,7 @@ function create_circular_grid_setup()
 
     # Generate synthetic board poses
     n_boards = 5
-    boards_true = OrderedDict{Int, Board{T}}()
+    boards_true = SortedDict{Int, Board{T}}()
     for board_id in 1:n_boards
         θ = π * (board_id-1) / n_boards
         Rb = SMatrix{3,3,T,9}(Ry(θ+π + π/4)*Rx(π/8))  # Boards are rotated to face the cameras, with a slight tilt

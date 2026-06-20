@@ -86,7 +86,7 @@ function create_circular_grid_setup()
     boards_true = OrderedDict{Int, Board{T}}()
     for board_id in 1:n_boards
         θ = π * (board_id-1) / n_boards
-        Rb = SMatrix{3,3,T,9}(Ry(θ+π))
+        Rb = SMatrix{3,3,T,9}(Ry(θ+π + π/4)*Rx(π/8))  # Boards are rotated to face the cameras, with a slight tilt
         tb = SVector{3,T}(0.0, 0.0, radius_cams)  # All boards are placed on the same circle as the cameras
         boards_true[board_id] = Board{T}(Rb, tb)
     end

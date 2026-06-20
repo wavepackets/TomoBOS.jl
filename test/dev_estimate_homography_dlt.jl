@@ -6,6 +6,10 @@ using TomoBOS
 using PythonCall
 plt = pyimport("matplotlib.pyplot")
 
+dir_save = joinpath(@__DIR__, "dev_estimate_homography_dlt")
+if !isdir(dir_save)
+    mkpath(dir_save)
+end
 
 T = Float64
 rng = MersenneTwister(1234)
@@ -30,5 +34,6 @@ ax.plot([p[1] for p in pts_dst_est], [p[2] for p in pts_dst_est], "x", label="Es
 ax.set_aspect("equal")
 ax.legend()
 
-
-plt.show()
+fig.tight_layout()
+fig.savefig(joinpath(dir_save, "homography_estimation.png"), dpi=300)
+# plt.show()

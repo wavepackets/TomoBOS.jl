@@ -101,6 +101,22 @@ end
     @test H_est ≈ H_true
 end
 
+@testset "estimate_single_board_pose" begin
+    (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup()
+
+    cam_true = cams_true[1]
+    board_true = boards_true[1]
+    marker_data = filter(md -> md.camera_id == 1 && md.board_id == 1, all_marker_data)[1]  # 適当なマーカー観測データを選ぶ
+
+    # Estimate the board pose using the marker data and the known camera pose
+    R, t = TomoBOS.estimate_single_board_pose(marker_data, cam_true.K)
+
+    # Compare the estimated board pose with the true board pose
+    atol = 1e-8
+    @test R ≈ board_true.R atol=atol
+    @test t ≈ board_true.t atol=atol
+end
+
 # @testset "estimate_initial_pose" begin
 #     # Set up a synthetic problem with known camera and board poses, and synthetic marker data
 #     (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup()

@@ -201,8 +201,59 @@ function estimate_homography_dlt(pts_src::AbstractVector{<:SVector{3,T}}, pts_ds
     # Denormalize the homography
     H_unscaled = inv(T_dst) * H_norm * T_src
     H = H_unscaled / H_unscaled[3, 3]  # Normalize to make H[3,3] = 1
-    return H
+    return SMatrix{3,3,T,9}(H)
 end
 
+"""
+    estimate_pose_from_homography(H::SMatrix{3,3,T,9}, K::SMatrix{3,3,T,9}) where T<:Real
+
+Estimates the camera pose (rotation and translation) from a homography matrix and the camera intrinsic matrix.
+- `H`: Homography matrix (3x3 SMatrix)
+- `K`: Camera intrinsic matrix (3x3 SMatrix)
+Returns a tuple of (R, t) where R is the rotation matrix and t is the translation vector.
+"""
+function estimate_pose_from_homography(H::SMatrix{3,3,T,9}, K::SMatrix{3,3,T,9}) where T<:Real
+    invK = inv(K)
+    r1_raw = invK * H[:, 1]
+    r2_raw = invK * H[:, 2]
+    t_raw = invK * H[:, 3]
+
+    scale = (norm(r1_raw) + norm(r2_raw)) / 2  # norm(r1)だけでも良いが、r1とr2の両方を使うことでより安定する
+
+    r1 = r1_raw / scale
+    r2 = r2_raw / scale
+    t = t_raw / scale
+
+    r3 = cross(r1, r2)
+
+    R_raw = @SMatrix [
+        r1[1] r2[1] r3[1];
+        r1[2] r2[2] r3[2];
+        r1[3] r2[3] r3[3]
+    ]
+
+    # Ensure R is a proper rotation matrix using SVD
+    F = svd(R_raw)
+    R = F.U * F.Vt
+
+    return R, t
+end
+
+"""
+    estimate_single_board_pose(marker_data::MarkerData{T}, K::SMatrix{3,3,T,9}) where T<:Real
+
+Estimates the pose of a single board given the marker data and camera intrinsic matrix.
+- `marker_data`: MarkerData instance containing the detected marker corners and their corresponding board coordinates
+- `K`: Camera intrinsic matrix (3x3 SMatrix)
+Returns a tuple of (R, t) where R is the rotation matrix and t is the translation vector of the board with respect to the camera.
+"""
+function estimate_single_board_pose(marker_data::MarkerData{T}, K::SMatrix{3,3,T,9}) where T<:Real
+    # Convert board coordinates to homogeneous coordinates
+    ᵇx_markers_homo = [SVector{3,T}(x[1], x[2], 1.0) for x in marker_data.ᵇx_markers]
+
+    H = estimate_homography_dlt(ᵇx_markers_homo, marker_data.u_markers)
+    R, t = estimate_pose_from_homography(H, K)
+    return R, t
+end
 
 end # module TomoBOS

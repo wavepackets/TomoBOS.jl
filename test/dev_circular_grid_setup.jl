@@ -5,6 +5,11 @@ plt = pyimport("matplotlib.pyplot")
 
 include("helpers.jl")
 
+dir_save = joinpath(@__DIR__, "dev_circular_grid_setup")
+if !isdir(dir_save)
+    mkpath(dir_save)
+end
+
 # Test setup for circular grid configuration
 (; cams_true, boards_true, ᵇx_markers, all_marker_data) = create_circular_grid_setup()
 
@@ -43,7 +48,8 @@ for (i, board) in enumerate(values(boards_true))
     break  # Only plot the first board for clarity
 end
 
-plt.tight_layout()
+fig.tight_layout()
+fig.savefig(joinpath(dir_save, "camera_board_setup.png"), dpi=300)
 
 # ==========================================
 # Visualize the projected marker pixels
@@ -74,5 +80,6 @@ for (i, board) in enumerate(values(boards_true))
     end
 end
 
-plt.tight_layout()
-plt.show()
+fig.tight_layout()
+fig.savefig(joinpath(dir_save, "projected_markers.png"), dpi=300)
+# plt.show()

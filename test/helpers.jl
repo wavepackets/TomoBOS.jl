@@ -23,7 +23,7 @@ Rz(θ) = [
 ]
 
 function generate_synthetic_marker_data(cams, boards, ᵇx_markers)
-    all_marker_data = Vector{MarkerData}()
+    all_marker_data = Vector{MarkerData{Float64}}()
     
     for (cam_id, cam) in cams
         for (board_id, board) in boards

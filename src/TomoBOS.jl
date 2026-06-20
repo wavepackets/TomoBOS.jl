@@ -16,7 +16,7 @@ using PythonCall
 # Exported types and functions to be used by other modules
 # ==========================================
 export PinholeCamera, Board, MarkerData
-export project_point
+export project_point, estimate_initial_poses
 
 
 
@@ -227,6 +227,7 @@ function estimate_pose_from_homography(H::SMatrix{3,3,T,9}, K::SMatrix{3,3,T,9})
     t = t_raw / scale
 
     r3 = cross(r1, r2)
+    r3 /= norm(r3)  # Ensure r3 is a unit vector
 
     R_raw = @SMatrix [
         r1[1] r2[1] r3[1];
@@ -256,6 +257,108 @@ function estimate_single_board_pose(marker_data::MarkerData{T}, K::SMatrix{3,3,T
     H = estimate_homography_dlt(ᵇx_markers_homo, marker_data.u_markers)
     R, t = estimate_pose_from_homography(H, K)
     return R, t
+end
+
+
+struct PoseEdge{T, N}
+    to_node::N  # (:cam, id) or (:board, id)
+    ᶜRb::SMatrix{3,3,T,9}   # Rotation matrix from camera to board
+    ᶜtb::SVector{3,T}       # Translation vector from camera to board
+end
+
+function estimate_initial_poses(all_marker_data::AbstractVector{<:MarkerData{T}}, cam_params; ref_camera_id=1) where T<:Real
+    # Construct a graph for the breadth-first search of camera and board poses
+    # Example:
+    # adj_list = Dict(
+    #     (:cam, 1) => [PoseEdge((:board, 1), ᶜRb, ᶜtb), PoseEdge((:board, 2), ᶜRb, ᶜtb)],
+    #     (:board, 1) => [PoseEdge((:cam, 1), ᶜRb, ᶜtb)],
+    #     ...
+    # )
+    Node_T = Tuple{Symbol, Int}
+    adj_dict = Dict{Node_T, Vector{PoseEdge{T, Node_T}}}()
+
+    for marker_data in all_marker_data
+        cam_node = (:cam, Int(marker_data.camera_id))
+        board_node = (:board, Int(marker_data.board_id))
+
+        K = cam_params[marker_data.camera_id].K
+        ᶜRb, ᶜtb = estimate_single_board_pose(marker_data, K)
+
+        # Add edges in both directions (camera to board and board to camera)
+        # `get!(adj_dict, cam_node, Vector{PoseEdge{T}}())` は「adj_dictにcam_nodeというキーが存在しない場合、空のVector{PoseEdge{T}}()を作成する」という意味
+        push!(get!(adj_dict, cam_node, Vector{PoseEdge{T, Node_T}}()), PoseEdge{T, Node_T}(board_node, ᶜRb, ᶜtb))  # カメラ座標系でのボード姿勢を保存
+        push!(get!(adj_dict, board_node, Vector{PoseEdge{T, Node_T}}()), PoseEdge{T, Node_T}(cam_node, ᶜRb, ᶜtb))  # この場合もカメラ座標系でのボード姿勢としておく
+    end
+
+    world_R = Dict{Node_T, SMatrix{3,3,T,9}}()
+    world_t = Dict{Node_T, SVector{3,T}}()
+
+    root_node = (:cam, ref_camera_id)
+    world_R[root_node] = SMatrix{3,3,T,9}(I)  # 基準カメラの姿勢をワールド座標系の原点とする
+    world_t[root_node] = @SVector zeros(T, 3)
+
+    queue = Queue{Node_T}()
+    push!(queue, root_node)
+
+    while !isempty(queue)
+        src = popfirst!(queue)
+
+        R_src = world_R[src]
+        t_src = world_t[src]
+
+        for edge in adj_dict[src]
+            (; ᶜRb, ᶜtb) = edge
+            dst = edge.to_node
+            if haskey(world_R, dst)
+                continue  # すでに姿勢が推定されているノードはスキップ
+            end
+
+            # 座標系を x = Rc * ᶜx + tc = Rb * ᵇx + tb と定義する
+            # ᶜx = ᶜRb * ᵇx + ᶜtb = Rc' * (x - tc) = Rc' * (Rb * ᵇx + tb - tc) = (Rc' * Rb) * ᵇx + (Rc' * (tb - tc))
+            # つまり ᶜRb = Rc' * Rb, ᶜtb = Rc' * (tb - tc) が成り立つ
+            # もしsrcがカメラ (Rc, tcが既知) なら、 Rb = Rc * ᶜRb, tb = Rc * ᶜtb + tc でボードの姿勢を推定できる
+            # もしsrcがボード (Rb, tbが既知) なら、 Rc = Rb * ᶜRb', tc = Rc * (-ᶜtb) + tb でカメラの姿勢を推定できる
+            if src[1] == :cam && dst[1] == :board
+                # カメラ Rc, tcが既知 -> ボードのRb, tbを推定
+                Rc, tc = R_src, t_src
+                Rb = Rc * ᶜRb
+                tb = Rc * ᶜtb + tc
+                R_dst, t_dst = Rb, tb
+            elseif src[1] == :board && dst[1] == :cam
+                # ボード Rb, tbが既知 -> カメラのRc, tcを推定
+                Rb, tb = R_src, t_src
+                Rc = Rb * ᶜRb'
+                tc = Rc * (- ᶜtb) + tb
+                R_dst, t_dst = Rc, tc
+            else
+                throw(ArgumentError("Invalid edge from $src to $dst"))
+            end
+
+            world_R[dst] = R_dst
+            world_t[dst] = t_dst
+
+            push!(queue, dst)
+        end
+    end
+
+    # Construct the final camera and board dictionaries
+    cams = SortedDict{Int, PinholeCamera{T}}()
+    boards = SortedDict{Int, Board{T}}()
+
+    for (node, R) in world_R
+        t = world_t[node]
+        if node[1] == :cam
+            camera_id = node[2]
+            K = cam_params[camera_id].K
+            umax, vmax = cam_params[camera_id].umax, cam_params[camera_id].vmax
+            cams[camera_id] = PinholeCamera{T}(R, t, K, umax, vmax)
+        elseif node[1] == :board
+            board_id = node[2]
+            boards[board_id] = Board{T}(R, t)
+        end
+    end
+
+    return cams, boards
 end
 
 end # module TomoBOS

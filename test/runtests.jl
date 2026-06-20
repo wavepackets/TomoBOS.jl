@@ -117,26 +117,28 @@ end
     @test t ≈ board_true.t atol=atol
 end
 
-# @testset "estimate_initial_pose" begin
-#     # Set up a synthetic problem with known camera and board poses, and synthetic marker data
-#     (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup()
 
-#     # Estimate initial poses using the synthetic marker data
-#     cams_init, boards_init = estimate_initial_pose(all_marker_data; ref_cam_id=1)
+@testset "estimate_initial_pose" begin
+    # Set up a synthetic problem with known camera and board poses, and synthetic marker data
+    (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup()
 
-#     # Compare the estimated poses with the true poses
-#     atol = 1e-5
-#     for cam_id in keys(cams_true)
-#         cam_true = cams_true[cam_id]
-#         cam_init = cams_init[cam_id]
-#         @test cam_init.R ≈ cam_true.R atol=atol
-#         @test cam_init.t ≈ cam_true.t atol=atol
-#     end
+    # Estimate initial poses using the synthetic marker data
+    cam_params = SortedDict{Int, Any}([(camera_id, (; K=cam.K, umax=cam.umax, vmax=cam.vmax)) for (camera_id, cam) in cams_true])
+    cams_init, boards_init = estimate_initial_poses(all_marker_data, cam_params; ref_camera_id=1)
 
-#     for board_id in keys(boards_true)
-#         board_true = boards_true[board_id]
-#         board_init = boards_init[board_id]
-#         @test board_init.R ≈ board_true.R atol=atol
-#         @test board_init.t ≈ board_true.t atol=atol
-#     end
-# end
+    # Compare the estimated poses with the true poses
+    atol = 1e-8
+    for camera_id in keys(cams_true)
+        cam_true = cams_true[camera_id]
+        cam_init = cams_init[camera_id]
+        @test cam_init.R ≈ cam_true.R atol=atol
+        @test cam_init.t ≈ cam_true.t atol=atol
+    end
+
+    for board_id in keys(boards_true)
+        board_true = boards_true[board_id]
+        board_init = boards_init[board_id]
+        @test board_init.R ≈ board_true.R atol=atol
+        @test board_init.t ≈ board_true.t atol=atol
+    end
+end

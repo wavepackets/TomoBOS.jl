@@ -51,10 +51,10 @@ function generate_synthetic_marker_data(cams, boards, ᵇx_markers)
     return all_marker_data
 end
 
-function create_circular_grid_setup()
+function create_circular_grid_setup(camera_type::Type{<:PinholeCamera})
     # Generate synthetic camera poses
     T = Float64
-    α = 7500.0
+    α = 7250.0   # f/Δpx = 25e-3 / 3.45e-6 (レンズ焦点距離 f=25 mm, ピクセルサイズ Δpx=3.45 μm はThe imaging sources DMK33GX273より)
     umax = 1440
     vmax = 1080
     u0, v0 = (umax+1)/2, (vmax+1)/2
@@ -79,6 +79,59 @@ function create_circular_grid_setup()
             Rc1 * ᶜx - Rc * ᶜx + tc1
         )
         cams_true[cam_id] = PinholeCamera{T}(Rc, tc, K, umax, vmax)
+    end
+
+    # Generate synthetic board poses
+    n_boards = 5
+    boards_true = SortedDict{Int, Board{T}}()
+    for board_id in 1:n_boards
+        θ = π * (board_id-1) / n_boards
+        Rb = SMatrix{3,3,T,9}(Ry(θ+π + π/4)*Rx(π/8))  # Boards are rotated to face the cameras, with a slight tilt
+        tb = SVector{3,T}(0.0, 0.0, radius_cams)  # All boards are placed on the same circle as the cameras
+        boards_true[board_id] = Board{T}(Rb, tb)
+    end
+
+    # Generate synthetic marker data
+    ᵇx_markers = [SVector{3,T}(x, y, 0.0) for x in 0:0.02:0.1, y in 0:0.02:0.1]
+
+    # Generate synthetic marker data for all cameras and boards
+    all_marker_data = generate_synthetic_marker_data(cams_true, boards_true, ᵇx_markers)
+
+    return (; cams_true, boards_true, ᵇx_markers, all_marker_data)
+end
+
+
+function create_circular_grid_setup(camera_type::Type{<:TelecentricCamera})
+    # Generate synthetic camera poses
+    T = Float64
+
+    # テレセントリックの場合、実物長さ l1, 像の長さl2, 実物側焦点距離f1, 像側焦点距離f2のとき、l1:l2 = f1:f2 より l2 = l1 * f2/f1
+    # ピクセルサイズ Δpx とすれば、ピクセル座標系での長さは l2/Δpx = l1 * f2/(f1*Δpx)
+    # f1 = 1500 mm, f2 = 25 mm, Δpx = 3.45 μm の場合、f2/(f1*Δpx) = 25e-3/(1500*3.45e-6) ≈ 4830 となるので、mx = my = 4830 とする
+    mx = my = 4830
+    umax = 1440
+    vmax = 1080
+    cx, cy = (umax+1)/2, (vmax+1)/2  # 画像中心 (ピクセル座標を1からumax, 1からvmaxの範囲とする)
+
+    n_cams = 8
+    radius_cams = 0.5  # All cameras are placed on a circle of this radius around [0,0,radius_cams] in the world coordinate
+    ᶜx = SVector{3,T}(0.0, 0.0, radius_cams)
+
+    cams_true = SortedDict{Int, TelecentricCamera{T}}()
+    Rc1 = SMatrix{3,3,T,9}(I)
+    tc1 = SVector{3,T}(0.0, 0.0, 0.0)
+    cams_true[1] = TelecentricCamera{T}(Rc1, tc1, mx, my, cx, cy, umax, vmax)
+
+    for cam_id in 2:n_cams
+        θ = π * (cam_id-1) / n_cams
+        Rc = SMatrix{3,3,T,9}(Ry(θ))
+
+        ## Assume Rc1 * ᶜx + tc1 = Rc * ᶜx + tc
+        ## => tc = Rc1 * ᶜx - Rc * ᶜx + tc1
+        tc = SVector{3,T}(
+            Rc1 * ᶜx - Rc * ᶜx + tc1
+        )
+        cams_true[cam_id] = TelecentricCamera{T}(Rc, tc, mx, my, cx, cy, umax, vmax)
     end
 
     # Generate synthetic board poses

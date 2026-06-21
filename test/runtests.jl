@@ -63,6 +63,30 @@ include("helpers.jl")
     @test bytes_allocated == 0
 end
 
+@testset "project_point (TelecentricCamera)" begin
+    T = Float64
+    mx = my = 10.0
+    umax = 10
+    vmax = 5
+    cx, cy = (umax+1)/2, (vmax+1)/2  # 画像中心 (ピクセル座標を1からumax, 1からvmaxの範囲とする)
+    Rc = SMatrix{3,3,T,9}(I)    # Rotation matrix for camera
+    tc = SVector{3,T}(0.0, 0.0, 0.0) # Translation vector for camera
+    cam = TelecentricCamera{T}(Rc, tc, mx, my, cx, cy, umax, vmax)
+
+    Rb = SMatrix{3,3,T,9}(Ry(π)*Rz(π))    # Rotation matrix for board (180° around Y and Z)
+    tb = SVector{3,T}(1.0, 0.0, 2.0) # Translation vector for board (2 units in front of camera)
+    board = Board{T}(Rb, tb)
+
+    ᵇx = SVector{3,T}(1.0, 2.0, 0.0)  # カメラ座標系では (2, -2, 2)
+
+    # 手計算すると u = (mx*Xc + cx, my*Yc + cy) = (10*2+5.5, 10*(-2)+3) = (25.5, -17.0))
+    u = project_point(ᵇx, cam, board)
+    @test u ≈ SVector{3,T}(25.5, -17.0, 1.0)
+
+    bytes_allocated = @allocated project_point(ᵇx, cam, board)
+    @test bytes_allocated == 0
+end
+
 @testset "normalize_points" begin
     T = Float64
     pts = [SVector{3,T}(1.0, 2.0, 1.0), SVector{3,T}(3.0, 4.0, 1.0), SVector{3,T}(5.0, 6.0, 1.0)]
@@ -102,14 +126,15 @@ end
 end
 
 @testset "estimate_single_board_pose" begin
-    (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup()
+    (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup(PinholeCamera)
 
     cam_true = cams_true[1]
     board_true = boards_true[1]
     marker_data = filter(md -> md.camera_id == 1 && md.board_id == 1, all_marker_data)[1]  # 適当なマーカー観測データを選ぶ
 
     # Estimate the board pose using the marker data and the known camera pose
-    R, t = TomoBOS.estimate_single_board_pose(marker_data, cam_true.K)
+    cam_tmp = PinholeCamera{Float64}(SMatrix{3,3,Float64,9}(I), SVector{3,Float64}(0.0, 0.0, 0.0), cam_true.K, cam_true.umax, cam_true.vmax)
+    R, t = TomoBOS.estimate_single_board_pose(marker_data, cam_tmp)
 
     # Compare the estimated board pose with the true board pose
     atol = 1e-8
@@ -120,11 +145,14 @@ end
 
 @testset "estimate_initial_pose" begin
     # Set up a synthetic problem with known camera and board poses, and synthetic marker data
-    (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup()
+    (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup(PinholeCamera)
 
     # Estimate initial poses using the synthetic marker data
-    cam_params = SortedDict{Int, Any}([(camera_id, (; K=cam.K, umax=cam.umax, vmax=cam.vmax)) for (camera_id, cam) in cams_true])
-    cams_init, boards_init = estimate_initial_poses(all_marker_data, cam_params; ref_camera_id=1)
+    cams_known_param = SortedDict{Int, PinholeCamera{Float64}}([
+            (camera_id, PinholeCamera{Float64}(SMatrix{3,3,Float64,9}(I), SVector{3,Float64}(0.0, 0.0, 0.0), cam.K, cam.umax, cam.vmax))
+            for (camera_id, cam) in cams_true
+        ])
+    cams_init, boards_init = estimate_initial_poses(all_marker_data, cams_known_param; ref_camera_id=1)
 
     # Compare the estimated poses with the true poses
     atol = 1e-8

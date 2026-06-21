@@ -5,13 +5,13 @@ plt = pyimport("matplotlib.pyplot")
 
 include("helpers.jl")
 
-dir_save = joinpath(@__DIR__, "dev_circular_grid_setup")
+dir_save = joinpath(@__DIR__, "dev_circular_grid_setup_telecentric")
 if !isdir(dir_save)
     mkpath(dir_save)
 end
 
 # Test setup for circular grid configuration
-(; cams_true, boards_true, ᵇx_markers, all_marker_data) = create_circular_grid_setup(PinholeCamera)
+(; cams_true, boards_true, ᵇx_markers, all_marker_data) = create_circular_grid_setup(TelecentricCamera)
 
 n_cams = length(cams_true)
 n_boards = length(boards_true)

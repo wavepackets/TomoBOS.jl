@@ -15,7 +15,8 @@ using PythonCall
 # ==========================================
 # Exported types and functions to be used by other modules
 # ==========================================
-export PinholeCamera, Board, MarkerData
+export PinholeCamera, TelecentricCamera
+export Board, MarkerData
 export project_point, estimate_initial_poses
 
 
@@ -44,6 +45,16 @@ struct PinholeCamera{T<:Real} <: AbstractCamera
     vmax::Int               # Maximum v coordinate
 end
 
+struct TelecentricCamera{T<:Real} <: AbstractCamera
+    R::SMatrix{3,3,T,9}    # Rotation matrix
+    t::SVector{3,T}        # Translation vector
+    mx::T                  # Magnification factor in x
+    my::T                  # Magnification factor in y
+    cx::T                  # Principal point x-coordinate
+    cy::T                  # Principal point y-coordinate
+    umax::Int              # Maximum u coordinate
+    vmax::Int              # Maximum v coordinate
+end
 
 
 
@@ -114,6 +125,22 @@ function project_point(ᵇx, cam::PinholeCamera{T}, board::Board{T}) where T<:Re
     # Project point onto image plane
     u = cam.K[1,1] * (ᶜx[1] / ᶜx[3]) + cam.K[1,3]
     v = cam.K[2,2] * (ᶜx[2] / ᶜx[3]) + cam.K[2,3]
+
+    return SVector{3,T}(u, v, 1)
+end
+
+function project_point(ᵇx, cam::TelecentricCamera{T}, board::Board{T}) where T<:Real
+    # Transform point from board coordinates to global coordinates
+    Rb, tb = board.R, board.t
+    x = Rb * ᵇx .+ tb
+    
+    # Transform point from global coordinates to camera coordinates
+    Rc, tc = cam.R, cam.t
+    ᶜx = Rc' * (x .- tc)  # Assume x = Rc * ᶜx + tc => ᶜx = Rc' * (x - tc)
+
+    # Project point onto image plane using telecentric projection
+    u = cam.mx * ᶜx[1] + cam.cx
+    v = cam.my * ᶜx[2] + cam.cy
 
     return SVector{3,T}(u, v, 1)
 end
@@ -206,16 +233,22 @@ function estimate_homography_dlt(pts_src::AbstractVector{<:SVector{3,T}}, pts_ds
     return SMatrix{3,3,T,9}(H)
 end
 
-"""
-    estimate_pose_from_homography(H::SMatrix{3,3,T,9}, K::SMatrix{3,3,T,9}) where T<:Real
 
-Estimates the camera pose (rotation and translation) from a homography matrix and the camera intrinsic matrix.
-- `H`: Homography matrix (3x3 SMatrix)
-- `K`: Camera intrinsic matrix (3x3 SMatrix)
-Returns a tuple of (R, t) where R is the rotation matrix and t is the translation vector.
 """
-function estimate_pose_from_homography(H::SMatrix{3,3,T,9}, K::SMatrix{3,3,T,9}) where T<:Real
-    invK = inv(K)
+    estimate_single_board_pose(marker_data::MarkerData{T}, K::SMatrix{3,3,T,9}) where T<:Real
+
+Estimates the pose of a single board given the marker data and camera intrinsic matrix.
+- `marker_data`: MarkerData instance containing the detected marker corners and their corresponding board coordinates
+- `cam`: PinholeCamera instance containing the camera intrinsic matrix (assume `K`, `umax`, and `vmax` are available in the camera parameters)
+Returns a tuple of (R, t) where R is the rotation matrix and t is the translation vector of the board with respect to the camera.
+"""
+function estimate_single_board_pose(marker_data::MarkerData{T}, cam::PinholeCamera{T}) where T<:Real
+    # Convert board coordinates to homogeneous coordinates
+    ᵇx_markers_homo = [SVector{3,T}(x[1], x[2], 1.0) for x in marker_data.ᵇx_markers]
+
+    H = estimate_homography_dlt(ᵇx_markers_homo, marker_data.u_markers)
+    
+    invK = inv(cam.K)
     r1_raw = invK * H[:, 1]
     r2_raw = invK * H[:, 2]
     t_raw = invK * H[:, 3]
@@ -242,23 +275,6 @@ function estimate_pose_from_homography(H::SMatrix{3,3,T,9}, K::SMatrix{3,3,T,9})
     return R, t
 end
 
-"""
-    estimate_single_board_pose(marker_data::MarkerData{T}, K::SMatrix{3,3,T,9}) where T<:Real
-
-Estimates the pose of a single board given the marker data and camera intrinsic matrix.
-- `marker_data`: MarkerData instance containing the detected marker corners and their corresponding board coordinates
-- `K`: Camera intrinsic matrix (3x3 SMatrix)
-Returns a tuple of (R, t) where R is the rotation matrix and t is the translation vector of the board with respect to the camera.
-"""
-function estimate_single_board_pose(marker_data::MarkerData{T}, K::SMatrix{3,3,T,9}) where T<:Real
-    # Convert board coordinates to homogeneous coordinates
-    ᵇx_markers_homo = [SVector{3,T}(x[1], x[2], 1.0) for x in marker_data.ᵇx_markers]
-
-    H = estimate_homography_dlt(ᵇx_markers_homo, marker_data.u_markers)
-    R, t = estimate_pose_from_homography(H, K)
-    return R, t
-end
-
 
 struct PoseEdge{T, N}
     to_node::N  # (:cam, id) or (:board, id)
@@ -266,7 +282,12 @@ struct PoseEdge{T, N}
     ᶜtb::SVector{3,T}       # Translation vector from camera to board
 end
 
-function estimate_initial_poses(all_marker_data::AbstractVector{<:MarkerData{T}}, cam_params; ref_camera_id=1) where T<:Real
+function estimate_initial_poses(
+        all_marker_data::AbstractVector{<:MarkerData{T}}, 
+        cams_known_param::AbstractDict{Int, <:PinholeCamera{T}}; 
+        ref_camera_id=1
+    ) where T<:Real
+
     # Construct a graph for the breadth-first search of camera and board poses
     # Example:
     # adj_list = Dict(
@@ -281,8 +302,8 @@ function estimate_initial_poses(all_marker_data::AbstractVector{<:MarkerData{T}}
         cam_node = (:cam, Int(marker_data.camera_id))
         board_node = (:board, Int(marker_data.board_id))
 
-        K = cam_params[marker_data.camera_id].K
-        ᶜRb, ᶜtb = estimate_single_board_pose(marker_data, K)
+        cam = cams_known_param[marker_data.camera_id]
+        ᶜRb, ᶜtb = estimate_single_board_pose(marker_data, cam)
 
         # Add edges in both directions (camera to board and board to camera)
         # `get!(adj_dict, cam_node, Vector{PoseEdge{T}}())` は「adj_dictにcam_nodeというキーが存在しない場合、空のVector{PoseEdge{T}}()を作成する」という意味
@@ -342,23 +363,22 @@ function estimate_initial_poses(all_marker_data::AbstractVector{<:MarkerData{T}}
     end
 
     # Construct the final camera and board dictionaries
-    cams = SortedDict{Int, PinholeCamera{T}}()
-    boards = SortedDict{Int, Board{T}}()
+    cams_out = SortedDict{Int, PinholeCamera{T}}()
+    boards_out = SortedDict{Int, Board{T}}()
 
     for (node, R) in world_R
         t = world_t[node]
         if node[1] == :cam
             camera_id = node[2]
-            K = cam_params[camera_id].K
-            umax, vmax = cam_params[camera_id].umax, cam_params[camera_id].vmax
-            cams[camera_id] = PinholeCamera{T}(R, t, K, umax, vmax)
+            cam = cams_known_param[camera_id]
+            cams_out[camera_id] = PinholeCamera{T}(R, t, cam.K, cam.umax, cam.vmax)
         elseif node[1] == :board
             board_id = node[2]
-            boards[board_id] = Board{T}(R, t)
+            boards_out[board_id] = Board{T}(R, t)
         end
     end
 
-    return cams, boards
+    return cams_out, boards_out
 end
 
 end # module TomoBOS

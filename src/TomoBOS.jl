@@ -276,6 +276,114 @@ function estimate_single_board_pose(marker_data::MarkerData{T}, cam::PinholeCame
 end
 
 
+function estimate_single_board_pose(marker_data::MarkerData{T}, cam::TelecentricCamera{T}) where T<:Real
+    # Convert board coordinates to homogeneous coordinates
+    ᵇx_markers_homo = [SVector{3,T}(x[1], x[2], 1.0) for x in marker_data.ᵇx_markers]
+
+    H = estimate_homography_dlt(ᵇx_markers_homo, marker_data.u_markers)
+
+    # Telecentric cameraの投影モデル (ref: Zhang & Chen (2026) https://doi.org/10.3390/s26051427)
+    # u = mx * ᶜx[1] + cx
+    # v = my * ᶜx[2] + cy
+    # ᶜx[3] 成分の情報は消える
+    #
+    # ボード座標系からカメラ座標系への変換を ᶜx = ᶜRb ᵇx + ᶜtb とする (ᵇx[3] = 0 とする)
+    # ただし成分を
+    #       [r11 r12 r13]        [t1]
+    # ᶜRb = [r21 r22 r23], ᶜtb = [t2]
+    #       [r31 r32 r33]        [t3]
+    # とすると、次のように書ける。
+    # ᶜx[1] = r11*ᵇx[1] + r12*ᵇx[2] + t1 (ᵇx[3] = 0 のため)
+    # ᶜx[2] = r21*ᵇx[1] + r22*ᵇx[2] + t2
+    #
+    # まとめると
+    # [u]   [mx  0  cx] [ᶜx[1]]   [mx  0  cx] [r11  r12  t1] [ᵇx[1]]
+    # [v] = [0  my  cy] [ᶜx[2]] = [0  my  cy] [r21  r22  t2] [ᵇx[2]]
+    # [1]   [0   0   1] [  1  ]   [0   0   1] [  0    0   1] [  1  ]
+    #                                  ↑ K         ↑ [Rs|ts; 0|1]
+    #
+    # 他方で、DLT法により以下のホモグラフィ行列が求まる。
+    # [u]   [h11 h12 h13] [ᵇx[1]]
+    # [v] = [h21 h22 h23] [ᵇx[2]]
+    # [1]   [ 0   0   1 ] [  1  ]
+    #             ↑ H
+    #
+    # 比較すれば H = K [Rs|ts] より K⁻¹ H = [Rs|ts; 0|1]、つまり
+    # [1/mx   0   -cx/mx] [h11 h12 h13]   [h11/mx  h12/mx  (h13/mx - cx/mx)]   [r11 r12 t1]
+    # [  0  1/my  -cy/my] [h21 h22 h23] = [h21/my  h22/my  (h23/my - cy/my)] = [r21 r22 t2]
+    # [  0    0      1  ] [  0   0   1]   [   0       0            1       ]   [ 0   0   1]
+
+    (; mx, my, cx, cy) = cam  # mx, myは既知とする (そうでない場合はオリジナルのZhang & Chenを参照)
+    r11 = H[1, 1] / mx
+    r12 = H[1, 2] / mx
+    t1 = (H[1, 3] - cx) / mx
+
+    r21 = H[2, 1] / my
+    r22 = H[2, 2] / my
+    t2 = (H[2, 3] - cy) / my
+
+    t3 = 0.0  # 単一ホモグラフィからは一意に決まらないため、初期値として0を入れておく
+
+    # ᶜRb は回転行列なので、r31² + r32² + r33² = 1 となるから、r31² = 1 - (r11² + r21²) が成り立つ。
+    # また [r11 r21 r31] ⋅ [r12 r22 r32] = 0 であるから、r11*r12 + r21*r22 + r31*r32 = 0 であり、
+    # つまり r31*r32 = -(r11*r12 + r21*r22) となるように、r31とr32の符号を決定する必要がある。
+    r31_abs = sqrt(max(0.0, 1 - r11^2 - r21^2))   # ルート内が負にならないように max(0.0, ...) を使う
+    r32_abs = sqrt(max(0.0, 1 - r12^2 - r22^2))
+
+    product_val = -(r11*r12 + r21*r22)
+    s = sign(product_val)  # r31とr32の符号を決定するための符号
+    if s == 0
+        s = 1.0  # 積が0の場合は正ということにする
+    end
+
+    poses = Vector{Tuple{SMatrix{3,3,T,9}, SVector{3,T}}}(undef, 2)
+
+    # 候補1: r31 が正の場合
+    let   # スコープを限定するために let ブロックを使う
+        r31 = r31_abs
+        r32 = s * r32_abs  # r31が正なら、r32の符号は s と一致
+
+        r1 = SVector{3,T}(r11, r21, r31)  # 1列目
+        r2 = SVector{3,T}(r12, r22, r32)  # 2列目
+        r3 = cross(r1, r2)  # 3列目は外積で求める
+
+        R_raw = @SMatrix [
+            r1[1] r2[1] r3[1];
+            r1[2] r2[2] r3[2];
+            r1[3] r2[3] r3[3]
+        ]
+
+        F = svd(R_raw)
+        R = F.U * F.Vt
+        t = SVector{3,T}(t1, t2, t3)
+        poses[1] = (R, t)
+    end
+
+    # 候補2: r31 が負の場合
+    let
+        r31 = -r31_abs
+        r32 = -s * r32_abs  # r31が負なら、r32の符号は -s と一致
+
+        r1 = SVector{3,T}(r11, r21, r31)  # 1列目
+        r2 = SVector{3,T}(r12, r22, r32)  # 2列目
+        r3 = cross(r1, r2)  # 3列目は外積で求める
+
+        R_raw = @SMatrix [
+            r1[1] r2[1] r3[1];
+            r1[2] r2[2] r3[2];
+            r1[3] r2[3] r3[3]
+        ]
+
+        F = svd(R_raw)
+        R = F.U * F.Vt
+        t = SVector{3,T}(t1, t2, t3)
+        poses[2] = (R, t)
+    end
+
+    return poses  # 2つの候補姿勢を返す
+end
+
+
 struct PoseEdge{T, N}
     to_node::N  # (:cam, id) or (:board, id)
     ᶜRb::SMatrix{3,3,T,9}   # Rotation matrix from camera to board

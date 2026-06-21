@@ -8,26 +8,42 @@ using TomoBOS
 
 include("helpers.jl")
 
-@testset "project_point (TelecentricCamera)" begin
-    T = Float64
-    mx = my = 10.0
-    umax = 10
-    vmax = 5
-    cx, cy = (umax+1)/2, (vmax+1)/2  # 画像中心 (ピクセル座標を1からumax, 1からvmaxの範囲とする)
-    Rc = SMatrix{3,3,T,9}(I)    # Rotation matrix for camera
-    tc = SVector{3,T}(0.0, 0.0, 0.0) # Translation vector for camera
-    cam = TelecentricCamera{T}(Rc, tc, mx, my, cx, cy, umax, vmax)
+@testset "estimate_single_board_pose" begin
+    (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup(TelecentricCamera)
 
-    Rb = SMatrix{3,3,T,9}(Ry(π)*Rz(π))    # Rotation matrix for board (180° around Y and Z)
-    tb = SVector{3,T}(1.0, 0.0, 2.0) # Translation vector for board (2 units in front of camera)
-    board = Board{T}(Rb, tb)
+    cam_true = cams_true[1]
+    board_true = boards_true[1]
+    marker_data = filter(md -> md.camera_id == 1 && md.board_id == 1, all_marker_data)[1]  # 適当なマーカー観測データを選ぶ
 
-    ᵇx = SVector{3,T}(1.0, 2.0, 0.0)  # カメラ座標系では (2, -2, 2)
+    # Estimate the board pose using the marker data and the known camera pose
+    cam_tmp = TelecentricCamera{Float64}(
+        SMatrix{3,3,Float64,9}(I),
+        SVector{3,Float64}(0.0, 0.0, 0.0), 
+        cam_true.mx, cam_true.my, cam_true.cx, cam_true.cy, 
+        cam_true.umax, cam_true.vmax
+        )
+    poses = TomoBOS.estimate_single_board_pose(marker_data, cam_tmp)
 
-    # 手計算すると u = (mx*Xc + cx, my*Yc + cy) = (10*2+5.5, 10*(-2)+3) = (25.5, -17.0))
-    u = project_point(ᵇx, cam, board)
-    @test u ≈ SVector{3,T}(25.5, -17.0, 1.0)
+    # Compare the estimated board pose with the true board pose
+    atol = 1e-8
 
-    bytes_allocated = @allocated project_point(ᵇx, cam, board)
-    @test bytes_allocated == 0
+    R1, t1 = poses[1]  # 候補1
+    R2, t2 = poses[2]  # 候補2
+
+    @test xor(isapprox(R1, board_true.R, atol=atol), isapprox(R2, board_true.R, atol=atol))  # 候補1か候補2のどちらか一方のみが正しい (ボードが正面を向いていない場合)
+    @test t1[1] ≈ board_true.t[1] atol=atol
+    @test t1[2] ≈ board_true.t[2] atol=atol
+    @test t1[3] ≈ 0.0 atol=atol    ## 奥行位置は不定なので、今の実装だと 0 ということにしてる
+
+    @test t2[1] ≈ board_true.t[1] atol=atol
+    @test t2[2] ≈ board_true.t[2] atol=atol
+    @test t2[3] ≈ 0.0 atol=atol
+
+    # display(board_true.R)
+    # display(poses[1][1])
+    # display(poses[2][1])
+
+    # display(board_true.t)
+    # display(t1)
+    # display(t2)
 end

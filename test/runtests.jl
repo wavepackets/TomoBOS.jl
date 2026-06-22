@@ -130,7 +130,7 @@ end
 
     cam_true = cams_true[1]
     board_true = boards_true[1]
-    marker_data = filter(md -> md.camera_id == 1 && md.board_id == 1, all_marker_data)[1]  # 適当なマーカー観測データを選ぶ
+    marker_data = filter(md -> md.cam_id == 1 && md.board_id == 1, all_marker_data)[1]  # 適当なマーカー観測データを選ぶ
 
     # Estimate the board pose using the marker data and the known camera pose
     cam_tmp = PinholeCamera{Float64}(SMatrix{3,3,Float64,9}(I), SVector{3,Float64}(0.0, 0.0, 0.0), cam_true.K, cam_true.umax, cam_true.vmax)
@@ -148,7 +148,7 @@ end
 
     cam_true = cams_true[1]
     board_true = boards_true[1]
-    marker_data = filter(md -> md.camera_id == 1 && md.board_id == 1, all_marker_data)[1]  # 適当なマーカー観測データを選ぶ
+    marker_data = filter(md -> md.cam_id == 1 && md.board_id == 1, all_marker_data)[1]  # 適当なマーカー観測データを選ぶ
 
     # Estimate the board pose using the marker data and the known camera pose
     cam_tmp = TelecentricCamera{Float64}(
@@ -176,22 +176,22 @@ end
 end
 
 
-@testset "estimate_initial_pose" begin
+@testset "estimate_initial_pose (PinholeCamera)" begin
     # Set up a synthetic problem with known camera and board poses, and synthetic marker data
     (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup(PinholeCamera)
 
     # Estimate initial poses using the synthetic marker data
     cams_known_param = SortedDict{Int, PinholeCamera{Float64}}([
-            (camera_id, PinholeCamera{Float64}(SMatrix{3,3,Float64,9}(I), SVector{3,Float64}(0.0, 0.0, 0.0), cam.K, cam.umax, cam.vmax))
-            for (camera_id, cam) in cams_true
+            (cam_id, PinholeCamera{Float64}(SMatrix{3,3,Float64,9}(I), SVector{3,Float64}(0.0, 0.0, 0.0), cam.K, cam.umax, cam.vmax))
+            for (cam_id, cam) in cams_true
         ])
-    cams_init, boards_init = estimate_initial_poses(all_marker_data, cams_known_param; ref_camera_id=1)
+    cams_init, boards_init = estimate_initial_poses(all_marker_data, cams_known_param; ref_cam_id=1)
 
     # Compare the estimated poses with the true poses
     atol = 1e-8
-    for camera_id in keys(cams_true)
-        cam_true = cams_true[camera_id]
-        cam_init = cams_init[camera_id]
+    for cam_id in keys(cams_true)
+        cam_true = cams_true[cam_id]
+        cam_init = cams_init[cam_id]
         @test cam_init.R ≈ cam_true.R atol=atol
         @test cam_init.t ≈ cam_true.t atol=atol
     end
@@ -203,3 +203,32 @@ end
         @test board_init.t ≈ board_true.t atol=atol
     end
 end
+
+
+# @testset "estimate_initial_pose (TelecentricCamera)" begin
+#     # Set up a synthetic problem with known camera and board poses, and synthetic marker data
+#     (; cams_true, boards_true, all_marker_data) = create_circular_grid_setup(TelecentricCamera)
+
+#     # Estimate initial poses using the synthetic marker data
+#     cams_known_param = SortedDict{Int, TelecentricCamera{Float64}}([
+#             (cam_id, TelecentricCamera{Float64}(SMatrix{3,3,Float64,9}(I), SVector{3,Float64}(0.0, 0.0, 0.0), cam.K, cam.umax, cam.vmax))
+#             for (cam_id, cam) in cams_true
+#         ])
+#     cams_init, boards_init = estimate_initial_poses(all_marker_data, cams_known_param; ref_cam_id=1)
+
+#     # Compare the estimated poses with the true poses
+#     atol = 1e-8
+#     for cam_id in keys(cams_true)
+#         cam_true = cams_true[cam_id]
+#         cam_init = cams_init[cam_id]
+#         @test cam_init.R ≈ cam_true.R atol=atol
+#         @test cam_init.t ≈ cam_true.t atol=atol
+#     end
+
+#     for board_id in keys(boards_true)
+#         board_true = boards_true[board_id]
+#         board_init = boards_init[board_id]
+#         @test board_init.R ≈ board_true.R atol=atol
+#         @test board_init.t ≈ board_true.t atol=atol
+#     end
+# end
